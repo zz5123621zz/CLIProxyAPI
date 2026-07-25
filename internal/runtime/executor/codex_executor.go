@@ -35,11 +35,12 @@ import (
 )
 
 const (
-	codexUserAgent             = "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.135.0)"
-	codexOriginator            = "codex-tui"
-	codexDefaultImageToolModel = "gpt-image-2"
-	codexResponsesLiteHeader   = "X-OpenAI-Internal-Codex-Responses-Lite"
-	codexResponsesLiteMetadata = "client_metadata.ws_request_header_x_openai_internal_codex_responses_lite"
+	codexUserAgent                                = "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.135.0)"
+	codexOriginator                               = "codex-tui"
+	codexDefaultImageToolModel                    = "gpt-image-2"
+	codexResponsesLiteHeader                      = "X-OpenAI-Internal-Codex-Responses-Lite"
+	codexResponsesLiteMetadata                    = "client_metadata.ws_request_header_x_openai_internal_codex_responses_lite"
+	codexReasoningSummaryDeliverySequentialCutoff = "sequential_cutoff"
 )
 
 var dataTag = []byte("data:")
@@ -354,6 +355,36 @@ func codexReasoningReplayEnabledForSource(from sdktranslator.Format) bool {
 
 func sourceFormatEqual(from, want sdktranslator.Format) bool {
 	return strings.EqualFold(strings.TrimSpace(from.String()), want.String())
+}
+
+// applyCodexStreamOptionsAllowlist removes all stream options, then restores the
+// one provider-supported option La4Rain uses when it was explicitly supplied by
+// an OpenAI Responses client. Values injected by payload configuration are never
+// forwarded.
+func applyCodexStreamOptionsAllowlist(body, originalPayloadSource []byte, from sdktranslator.Format) []byte {
+	sanitized, _ := sjson.DeleteBytes(body, "stream_options")
+	if from != sdktranslator.FormatOpenAIResponse {
+		return sanitized
+	}
+
+	streamOptions := gjson.GetBytes(originalPayloadSource, "stream_options")
+	if !streamOptions.Exists() || !streamOptions.IsObject() {
+		return sanitized
+	}
+	delivery := streamOptions.Get("reasoning_summary_delivery")
+	if delivery.Type != gjson.String || delivery.String() != codexReasoningSummaryDeliverySequentialCutoff {
+		return sanitized
+	}
+
+	updated, err := sjson.SetBytes(
+		sanitized,
+		"stream_options.reasoning_summary_delivery",
+		codexReasoningSummaryDeliverySequentialCutoff,
+	)
+	if err != nil {
+		return sanitized
+	}
+	return updated
 }
 
 func codexClaudeCodeReplaySessionKey(ctx context.Context, payload []byte, headers http.Header) string {
@@ -1141,7 +1172,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
 	body, _ = sjson.DeleteBytes(body, "prompt_cache_retention")
 	body, _ = sjson.DeleteBytes(body, "safety_identifier")
-	body, _ = sjson.DeleteBytes(body, "stream_options")
+	body = applyCodexStreamOptionsAllowlist(body, originalPayloadSource, from)
 	body = normalizeCodexInstructions(body)
 	if e.cfg == nil || e.cfg.DisableImageGeneration == config.DisableImageGenerationOff {
 		body = ensureImageGenerationTool(body, baseModel, auth, opts.Headers)
@@ -1410,7 +1441,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
 	body, _ = sjson.DeleteBytes(body, "prompt_cache_retention")
 	body, _ = sjson.DeleteBytes(body, "safety_identifier")
-	body, _ = sjson.DeleteBytes(body, "stream_options")
+	body = applyCodexStreamOptionsAllowlist(body, originalPayloadSource, from)
 	body = helps.SetStringIfDifferent(body, "model", baseModel)
 	body = normalizeCodexInstructions(body)
 	if e.cfg == nil || e.cfg.DisableImageGeneration == config.DisableImageGenerationOff {
