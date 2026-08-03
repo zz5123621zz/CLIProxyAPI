@@ -27,6 +27,7 @@ jobs:
         run: |
           unformatted="$(gofmt -l \
             internal/api/middleware/response_writer.go \
+            internal/home/client.go \
             internal/logging/request_logger_body_source.go \
             internal/logging/request_logger_format.go \
             internal/pluginhost/host_callbacks.go \

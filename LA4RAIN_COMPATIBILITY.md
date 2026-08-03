@@ -31,13 +31,15 @@ authentication, or quota handling.
 
 ## Frozen baseline CI conformance
 
-The unmodified `v7.2.115` target passes its complete Go test suite but fails Go
-1.26 vet in pre-existing plugin stream-lifecycle and request-logging code. This
-integration branch keeps the full vet gate and includes two semantics-preserving
-conformance fixes:
+The unmodified `v7.2.115` target has a nondeterministic Home plugin-sync
+cancellation path and fails Go 1.26 vet in pre-existing plugin stream-lifecycle
+and request-logging code. This integration branch keeps the complete test and
+vet gates and includes semantics-preserving conformance fixes:
 
 - failed stream setup explicitly cancels its context, while a successful bridge
   retains the existing cancellation ownership;
+- cancellation of a dedicated Home plugin-sync request closes its connection so
+  a later Redis read deadline cannot mask the cancellation;
 - the internal `FileBodySource.WriteTo` helper is named `WriteBodyTo` so it is
   not mistaken for the standard `io.WriterTo` method with a different
   signature.
