@@ -29,6 +29,22 @@ summary sections progressively. It does not expose raw chain of thought and
 does not alter model selection, reasoning effort, tools, image parameters,
 authentication, or quota handling.
 
+## Frozen baseline CI conformance
+
+The unmodified `v7.2.115` target passes its complete Go test suite but fails Go
+1.26 vet in pre-existing plugin stream-lifecycle and request-logging code. This
+integration branch keeps the full vet gate and includes two semantics-preserving
+conformance fixes:
+
+- failed stream setup explicitly cancels its context, while a successful bridge
+  retains the existing cancellation ownership;
+- the internal `FileBodySource.WriteTo` helper is named `WriteBodyTo` so it is
+  not mistaken for the standard `io.WriterTo` method with a different
+  signature.
+
+These fixes do not change the Progressive Summary Compatibility scope or any
+public CPA protocol.
+
 ## Release gate
 
 The dedicated GitHub-hosted workflow runs the complete Go test and vet suites,

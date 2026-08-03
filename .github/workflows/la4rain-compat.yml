@@ -26,6 +26,11 @@ jobs:
       - name: Check formatting
         run: |
           unformatted="$(gofmt -l \
+            internal/api/middleware/response_writer.go \
+            internal/logging/request_logger_body_source.go \
+            internal/logging/request_logger_format.go \
+            internal/pluginhost/host_callbacks.go \
+            internal/pluginhost/host_model_stream_callbacks.go \
             internal/runtime/executor/codex_executor_execute.go \
             internal/runtime/executor/codex_executor_stream.go \
             internal/runtime/executor/codex_executor_stream_options.go \
