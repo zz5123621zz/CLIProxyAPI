@@ -1,0 +1,100 @@
+name: La4Rain compatibility image
+
+on:
+  push:
+    branches:
+      - upgrade/v7.2.115-preserve-progressive
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  IMAGE_NAME: ghcr.io/zz5123621zz/cliproxyapi-la4rain
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l \
+            internal/api/middleware/response_writer.go \
+            internal/home/client.go \
+            internal/logging/request_logger_body_source.go \
+            internal/logging/request_logger_format.go \
+            internal/pluginhost/host_callbacks.go \
+            internal/pluginhost/host_model_stream_callbacks.go \
+            internal/runtime/executor/codex_executor_execute.go \
+            internal/runtime/executor/codex_executor_stream.go \
+            internal/runtime/executor/codex_executor_stream_options.go \
+            internal/runtime/executor/codex_executor_stream_options_test.go)"
+          test -z "${unformatted}" || {
+            printf 'Files require gofmt:\n%s\n' "${unformatted}"
+            exit 1
+          }
+      - name: Test all packages
+        run: go test ./...
+      - name: Vet all packages
+        run: go vet ./...
+      - name: Refresh models catalog
+        run: bash .github/scripts/refresh-model-catalogs.sh
+      - name: Build server
+        run: go build -o test-output ./cmd/server
+
+  image:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=v7.2.115-la4rain-
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=v7.2.115-la4rain
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Record immutable image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          printf 'Deployable image: `%s@%s`\n' "${IMAGE_NAME}" "${IMAGE_DIGEST}" >> "${GITHUB_STEP_SUMMARY}"
+      - uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        with:
+          sarif_file: trivy-results.sarif
